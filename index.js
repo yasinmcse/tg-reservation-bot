@@ -1,6 +1,10 @@
 import express from "express";
 import { Telegraf } from "telegraf";
 
+// const BOT_TOKEN = process.env.BOT_TOKEN;
+const BOT_TOKEN = "8236706415:AAF9XXg4wqq6z6frtkdusbyNqV2C59O5Gz0";
+
+
 const BOT_TOKEN = process.env.BOT_TOKEN;
 if (!BOT_TOKEN) {
   throw new Error("BOT_TOKEN env değişkeni zorunlu.");
@@ -35,3 +39,4 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server ${PORT} portunda çalışıyor`);
 });
+
