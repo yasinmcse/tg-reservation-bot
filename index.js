@@ -2,6 +2,10 @@ import express from "express";
 import { Telegraf } from "telegraf";
 import { google } from "googleapis";
 
+console.log("BOT_TOKEN:", process.env.BOT_TOKEN);
+console.log("SHEET_ID:", process.env.SHEET_ID);
+console.log("GOOGLE_SERVICE_ACCOUNT exists:", !!process.env.GOOGLE_SERVICE_ACCOUNT);
+
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const bot = new Telegraf(BOT_TOKEN);
 
@@ -88,3 +92,4 @@ app.get("/", (_, res) => res.send("Bot çalışıyor ✅"));
 
 const PORT = 8080;
 app.listen(PORT, () => console.log(`Server ${PORT} portunda çalışıyor`));
+
