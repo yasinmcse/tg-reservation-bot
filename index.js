@@ -8,19 +8,28 @@ const bot = new Telegraf(BOT_TOKEN);
 // --- Slotlar ---
 const SLOTS = ["10:00", "11:00", "14:00"];
 
-// --- Google Sheets setup (JSON direkt) ---
+// --- Google Sheets setup (Base64) ---
 if (!process.env.GOOGLE_SERVICE_ACCOUNT) {
   console.error("❌ GOOGLE_SERVICE_ACCOUNT tanımlı değil!");
+  console.log("ENV KEYS:", Object.keys(process.env)); // Debug
   process.exit(1);
 }
 
-const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
+try {
+  const decoded = Buffer.from(process.env.GOOGLE_SERVICE_ACCOUNT, "base64").toString("utf-8");
+  console.log("GOOGLE_SERVICE_ACCOUNT (ilk 100 karakter):", decoded.slice(0, 100)); // Debug
 
-const auth = new google.auth.GoogleAuth({
-  credentials: serviceAccount,
-  scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-});
-const sheets = google.sheets({ version: "v4", auth });
+  const serviceAccount = JSON.parse(decoded);
+
+  const auth = new google.auth.GoogleAuth({
+    credentials: serviceAccount,
+    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+  });
+  var sheets = google.sheets({ version: "v4", auth });
+} catch (err) {
+  console.error("❌ GOOGLE_SERVICE_ACCOUNT parse edilemedi:", err.message);
+  process.exit(1);
+}
 
 const SHEET_ID = process.env.SHEET_ID;
 
@@ -28,7 +37,7 @@ async function saveReservation(row) {
   try {
     await sheets.spreadsheets.values.append({
       spreadsheetId: SHEET_ID,
-      range: "Reservations!A:E",
+      range: "Reservations!A:E", // Sheet tab adı "Reservations" olmalı
       valueInputOption: "RAW",
       requestBody: { values: [row] },
     });
