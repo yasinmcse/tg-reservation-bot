@@ -22,8 +22,13 @@ bot.on("callback_query", (ctx) => {
 
 // --- Express + Webhook ---
 const app = express();
-const secretPath = `/webhook`;  // ✅ sadeleştirdik
-app.use(secretPath, bot.webhookCallback(secretPath));
+const secretPath = "/webhook";
+
+// 🔹 JSON body parser ekledik
+app.use(express.json());
+
+// 🔹 Telegram webhook endpoint
+app.post(secretPath, bot.webhookCallback(secretPath));
 
 app.get("/", (_, res) => res.send("Bot çalışıyor ✅"));
 
