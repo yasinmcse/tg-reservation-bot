@@ -2,27 +2,26 @@ import express from "express";
 import { Telegraf } from "telegraf";
 import { google } from "googleapis";
 
-const BOT_TOKEN = process.env.BOT_TOKEN;
+const BOT_TOKEN = process.env.BOT_TOKEN; // Railway Variable
 const bot = new Telegraf(BOT_TOKEN);
 
 // --- Slotlar ---
 const SLOTS = ["10:00", "11:00", "14:00"];
 
-// --- Google Sheets setup (Base64) ---
-const serviceAccount = JSON.parse(
-  const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
+// --- Google Sheets setup ---
+const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT); // JSON direkt environment'dan
 const auth = new google.auth.GoogleAuth({
   credentials: serviceAccount,
   scopes: ["https://www.googleapis.com/auth/spreadsheets"],
 });
 const sheets = google.sheets({ version: "v4", auth });
-const SHEET_ID = process.env.SHEET_ID;
+const SHEET_ID = process.env.SHEET_ID; // Railway Variable
 
 async function saveReservation(row) {
   try {
     await sheets.spreadsheets.values.append({
       spreadsheetId: SHEET_ID,
-      range: "Reservations!A:E",
+      range: "Reservations!A:E", // Sheet tab adı "Reservations" olmalı
       valueInputOption: "RAW",
       requestBody: { values: [row] },
     });
@@ -67,8 +66,9 @@ bot.on("callback_query", async (ctx) => {
 // --- Express + Webhook ---
 const app = express();
 app.use(express.json());
+
 app.post("/webhook", bot.webhookCallback());
 app.get("/", (_, res) => res.send("Bot çalışıyor ✅"));
-const PORT = 8080;
-app.listen(PORT, () => console.log(`Server ${PORT} portunda çalışıyor`));
 
+const PORT = 8080; // Railway için sabit port
+app.listen(PORT, () => console.log(`Server ${PORT} portunda çalışıyor`));
