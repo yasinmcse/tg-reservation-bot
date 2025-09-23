@@ -2,26 +2,35 @@ import express from "express";
 import { Telegraf } from "telegraf";
 import { google } from "googleapis";
 
-const BOT_TOKEN = process.env.BOT_TOKEN; // Railway Variable
+const BOT_TOKEN = process.env.BOT_TOKEN;
 const bot = new Telegraf(BOT_TOKEN);
 
 // --- Slotlar ---
 const SLOTS = ["10:00", "11:00", "14:00"];
 
-// --- Google Sheets setup ---
-const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT); // JSON direkt environment'dan
+// --- Google Sheets setup (Base64 method) ---
+if (!process.env.GOOGLE_SERVICE_ACCOUNT) {
+  console.error("❌ GOOGLE_SERVICE_ACCOUNT tanımlı değil!");
+  process.exit(1);
+}
+
+const serviceAccount = JSON.parse(
+  Buffer.from(process.env.GOOGLE_SERVICE_ACCOUNT, "base64").toString("utf-8")
+);
+
 const auth = new google.auth.GoogleAuth({
   credentials: serviceAccount,
   scopes: ["https://www.googleapis.com/auth/spreadsheets"],
 });
 const sheets = google.sheets({ version: "v4", auth });
-const SHEET_ID = process.env.SHEET_ID; // Railway Variable
+
+const SHEET_ID = process.env.SHEET_ID;
 
 async function saveReservation(row) {
   try {
     await sheets.spreadsheets.values.append({
       spreadsheetId: SHEET_ID,
-      range: "Reservations!A:E", // Sheet tab adı "Reservations" olmalı
+      range: "Reservations!A:E", // Sheet sekmesinin adı "Reservations" olmalı
       valueInputOption: "RAW",
       requestBody: { values: [row] },
     });
