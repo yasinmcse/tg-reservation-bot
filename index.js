@@ -41,7 +41,8 @@ app.use(secretPath, bot.webhookCallback(secretPath));
 app.get("/", (_, res) => res.send("Bot çalışıyor ✅"));
 
 // Server başlat
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`Server ${PORT} portunda çalışıyor`);
 });
+
