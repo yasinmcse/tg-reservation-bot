@@ -10,8 +10,7 @@ const SLOTS = ["10:00", "11:00", "14:00"];
 
 // --- Google Sheets setup (Base64) ---
 const serviceAccount = JSON.parse(
-  Buffer.from(process.env.GOOGLE_SERVICE_ACCOUNT, "base64").toString("utf-8")
-);
+  const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
 const auth = new google.auth.GoogleAuth({
   credentials: serviceAccount,
   scopes: ["https://www.googleapis.com/auth/spreadsheets"],
@@ -72,3 +71,4 @@ app.post("/webhook", bot.webhookCallback());
 app.get("/", (_, res) => res.send("Bot çalışıyor ✅"));
 const PORT = 8080;
 app.listen(PORT, () => console.log(`Server ${PORT} portunda çalışıyor`));
+
