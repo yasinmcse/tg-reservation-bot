@@ -8,31 +8,40 @@ const bot = new Telegraf(BOT_TOKEN);
 // --- Slotlar ---
 const SLOTS = ["10:00", "11:00", "14:00"];
 
-// --- Google Sheets setup ---
-const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT); // Railway Variable
+// --- Google Sheets setup (Base64 yöntemi) ---
+const serviceAccount = JSON.parse(
+  Buffer.from(process.env.GOOGLE_SERVICE_ACCOUNT, "base64").toString("utf-8")
+);
 const auth = new google.auth.GoogleAuth({
   credentials: serviceAccount,
   scopes: ["https://www.googleapis.com/auth/spreadsheets"],
 });
 const sheets = google.sheets({ version: "v4", auth });
-const SHEET_ID = process.env.SHEET_ID; // Railway Variable
+const SHEET_ID = process.env.SHEET_ID; // Railway variable
 
 async function saveReservation(row) {
   try {
     await sheets.spreadsheets.values.append({
       spreadsheetId: SHEET_ID,
-      range: "Reservations!A:E", // Sheet tab adı Reservations olacak
+      range: "Reservations!A:E", // Sheet sekmesi "Reservations" olmalı
       valueInputOption: "RAW",
       requestBody: { values: [row] },
     });
+    console.log("✅ Google Sheet'e kayıt eklendi:", row);
   } catch (err) {
-    console.error("Google Sheets error:", err);
+    console.error("❌ Google Sheets hata:", err.message);
   }
 }
 
 // --- Bot Komutları ---
 bot.start(async (ctx) => {
-  await saveReservation([new Date().toISOString(), ctx.chat.id, ctx.from.first_name, "/start", ""]);
+  await saveReservation([
+    new Date().toISOString(),
+    ctx.chat.id,
+    ctx.from.first_name,
+    "/start",
+    ""
+  ]);
   ctx.reply("Merhaba! ✅ Randevu için /book yazabilirsin.");
 });
 
@@ -45,7 +54,13 @@ bot.command("book", (ctx) => {
 
 bot.on("callback_query", async (ctx) => {
   const slot = ctx.callbackQuery.data.replace("slot_", "");
-  await saveReservation([new Date().toISOString(), ctx.chat.id, ctx.from.first_name, "Rezervasyon", slot]);
+  await saveReservation([
+    new Date().toISOString(),
+    ctx.chat.id,
+    ctx.from.first_name,
+    "Rezervasyon",
+    slot
+  ]);
   ctx.answerCbQuery();
   ctx.reply(`✅ Rezervasyonunuz alındı: ${slot}`);
 });
@@ -54,8 +69,8 @@ bot.on("callback_query", async (ctx) => {
 const app = express();
 app.use(express.json());
 
-app.post("/webhook", bot.webhookCallback()); // Telegram webhook
+app.post("/webhook", bot.webhookCallback());
 app.get("/", (_, res) => res.send("Bot çalışıyor ✅"));
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => console.log(`Server ${PORT} portunda çalışıyor`));
