@@ -19,8 +19,8 @@ const sheetId = process.env.SHEET_ID;
 const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
 
 // 📅 Otomatik tarih & saat ayarları
-const DAYS_AHEAD = 7;  // kaç gün ileriye kadar slot üretilecek
-const DAILY_SLOTS = ["10:00", "11:00", "14:00", "15:00"]; // her gün için saatler
+const DAYS_AHEAD = 7;  
+const DAILY_SLOTS = ["10:00", "11:00", "14:00", "15:00"]; 
 
 // 📝 Sheet ayarları
 const SHEET_NAME = 'Reservations';     
@@ -42,7 +42,6 @@ const bot = new TelegramBot(token, { polling: true });
 
 /* ----------------- Yardımcı fonksiyonlar ----------------- */
 
-// ISO (YYYY-MM-DD) gün etiketi (tr-TR)
 function formatDateLabel(iso) {
   try {
     const d = new Date(iso + 'T00:00:00');
@@ -54,7 +53,6 @@ function formatDateLabel(iso) {
   }
 }
 
-// Sheet’teki kayıtları oku
 async function readAllRows() {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
@@ -89,7 +87,6 @@ async function getAvailabilityMap() {
   const today = new Date();
   const allSlots = new Map();
 
-  // Günleri ve saatleri üret
   for (let i = 0; i < DAYS_AHEAD; i++) {
     const d = new Date(today);
     d.setDate(today.getDate() + i);
@@ -97,9 +94,13 @@ async function getAvailabilityMap() {
     allSlots.set(iso, [...DAILY_SLOTS]);
   }
 
-  // Sheet’teki dolu slotları çek
+  console.log("🔹 Üretilen tüm slotlar:", Array.from(allSlots.entries()));
+
   const bookedRows = await readAllRows();
-  const booked = bookedRows.filter(r => r.status.toLowerCase() === "booked");
+  console.log("🔹 Sheet’ten okunan satırlar:", bookedRows);
+
+  const booked = bookedRows.filter(r => r.status && r.status.toLowerCase() === "booked");
+  console.log("🔹 Dolu olarak işaretlenen satırlar:", booked);
 
   for (const r of booked) {
     const date = r.date;
@@ -110,10 +111,11 @@ async function getAvailabilityMap() {
     }
   }
 
+  console.log("🔹 Son kullanılabilir slotlar:", Array.from(allSlots.entries()));
+
   return allSlots;
 }
 
-// Inline keyboard satırı oluştur
 function chunk(arr, size) {
   const out = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
@@ -139,7 +141,6 @@ function buildTimesKeyboard(dateISO, times) {
   return { inline_keyboard: rows };
 }
 
-// Rezervasyonu kaydet
 async function bookRow(dateISO, timeHHmm, chatId, displayName) {
   await sheets.spreadsheets.values.append({
     spreadsheetId: sheetId,
