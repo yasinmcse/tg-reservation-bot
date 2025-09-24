@@ -1,7 +1,7 @@
 const TelegramBot = require('node-telegram-bot-api');
 
 // Buraya kendi BOT TOKEN'INI yaz
-const token = "TELEGRAM_BOT_TOKEN";
+const token = "8236706415:AAF9XXg4wqq6z6frtkdusbyNqV2C59O5Gz0";
 
 const bot = new TelegramBot(token, { polling: true });
 
@@ -19,3 +19,4 @@ bot.onText(/\/book/, (msg) => {
 bot.on('message', (msg) => {
   console.log("Gelen mesaj:", msg.text);
 });
+
