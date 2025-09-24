@@ -278,11 +278,19 @@ bot.on("callback_query", async (cq) => {
       };
 
       await bot.sendMessage(
-        chatId,
-        "📞 Rezervasyonu tamamlamak için telefon numaranı paylaşır mısın?\n\n• Aşağıdaki **📱 Numaramı paylaş** butonuna dokun\n• Ya da **+90...** formatında yaz.",
-        { ...sharePhoneKeyboard, parse_mode: "Markdown" }
-      );
-    }
+  chatId,
+  "📞 Rezervasyonu tamamlamak için telefon numaranı paylaşır mısın?\n\n• Aşağıdaki 📱 **Numaramı paylaş** butonuna dokun\n• Ya da **+90...** formatında yaz.",
+  {
+    reply_markup: {
+      keyboard: [
+        [{ text: "📱 Numaramı paylaş", request_contact: true }]
+      ],
+      resize_keyboard: true,
+      one_time_keyboard: true
+    },
+    parse_mode: "Markdown"
+  }
+);
 
     await bot.answerCallbackQuery(id);
   } catch (err) {
@@ -325,3 +333,4 @@ bot.on("message", (msg) => {
     bot.sendMessage(msg.chat.id, "Rezervasyon için /book yazabilirsiniz. 🙂");
   }
 });
+
