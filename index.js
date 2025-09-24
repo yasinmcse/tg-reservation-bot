@@ -7,7 +7,7 @@ const sheetId = process.env.SHEET_ID;
 const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
 
 // 📝 Sheet ayarları
-const SHEET_NAME = 'Slots';     // farklıysa değiştir
+const SHEET_NAME = 'Reservations';     // farklıysa değiştir
 const RANGE_READ = `${SHEET_NAME}!A1:E`; // Date, Time, Status, ChatID, Name
 const MAX_DATE_BUTTONS = 9;     // aynı anda gösterilecek gün sayısı (müsait güne göre)
 const BUTTONS_PER_ROW = 3;      // satır başına kaç tarih/saat butonu
@@ -286,3 +286,4 @@ bot.on('message', (msg) => {
     bot.sendMessage(msg.chat.id, 'Rezervasyon için /book yazabilirsiniz. 🙂');
   }
 });
+
