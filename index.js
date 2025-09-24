@@ -23,10 +23,10 @@ const DAYS_AHEAD = 7;
 const DAILY_SLOTS = ["10:00", "11:00", "14:00", "15:00"]; 
 
 // 📝 Sheet ayarları
-const SHEET_NAME = 'Reservations';     
-const RANGE_READ = `${SHEET_NAME}!A1:E`; 
-const MAX_DATE_BUTTONS = 9;    
-const BUTTONS_PER_ROW = 3;      
+const SHEET_NAME = 'Reservations';
+const RANGE_READ = `${SHEET_NAME}!A1:F`; // Date, Time, Status, ChatID, Name, Phone
+const MAX_DATE_BUTTONS = 9;
+const BUTTONS_PER_ROW = 3;
 
 // ✅ Google Sheets client
 const auth = new google.auth.JWT(
@@ -39,6 +39,26 @@ const sheets = google.sheets({ version: 'v4', auth });
 
 // 🤖 Bot (polling)
 const bot = new TelegramBot(token, { polling: true });
+
+// ⏳ Geçici bekleyen rezervasyonlar (telefon bekleniyor)
+const pending = new Map(); // chatId -> { dateISO, timeHHmm, displayName }
+
+// 📞 Basit telefon doğrulama/normalize
+function normalizePhone(raw) {
+  if (!raw) return "";
+  let p = String(raw).trim();
+  // Telegram contact '+90...' şeklinde gelir; bazıları 0 ile başlar. Sadece rakam ve + bırak.
+  p = p.replace(/[^\d+]/g, "");
+  // Türkiye için örnek normalize: 10 haneli ise başına +90 ekle
+  if (/^\d{10}$/.test(p)) p = "+90" + p;
+  // 11 haneli 0'la başlıyorsa +90'a çevir
+  if (/^0\d{10}$/.test(p)) p = "+9" + p;
+  return p;
+}
+function isLikelyPhone(p) {
+  const n = normalizePhone(p);
+  return /^\+?\d{10,15}$/.test(n);
+}
 
 /* ----------------- Yardımcı fonksiyonlar ----------------- */
 
@@ -62,7 +82,7 @@ async function readAllRows() {
   const rows = res.data.values || [];
   if (rows.length === 0) return [];
 
-  const header = rows[0]; 
+  const header = rows[0];
   const data = rows.slice(1);
 
   const idx = {
@@ -71,14 +91,16 @@ async function readAllRows() {
     status: header.indexOf('Status'),
     chatId: header.indexOf('ChatID'),
     name: header.indexOf('Name'),
+    phone: header.indexOf('Phone'),
   };
 
-  return data.map((r, i) => ({
+  return data.map((r) => ({
     date: (r[idx.date] || '').trim(),
     time: (r[idx.time] || '').trim(),
     status: (r[idx.status] || '').trim(),
     chatId: (r[idx.chatId] || '').trim(),
     name: (r[idx.name] || '').trim(),
+    phone: idx.phone >= 0 ? (r[idx.phone] || '').trim() : '',
   }));
 }
 
@@ -94,13 +116,8 @@ async function getAvailabilityMap() {
     allSlots.set(iso, [...DAILY_SLOTS]);
   }
 
-  console.log("🔹 Üretilen tüm slotlar:", Array.from(allSlots.entries()));
-
   const bookedRows = await readAllRows();
-  console.log("🔹 Sheet’ten okunan satırlar:", bookedRows);
-
   const booked = bookedRows.filter(r => r.status && r.status.toLowerCase() === "booked");
-  console.log("🔹 Dolu olarak işaretlenen satırlar:", booked);
 
   for (const r of booked) {
     const date = r.date;
@@ -110,8 +127,6 @@ async function getAvailabilityMap() {
       allSlots.set(date, times);
     }
   }
-
-  console.log("🔹 Son kullanılabilir slotlar:", Array.from(allSlots.entries()));
 
   return allSlots;
 }
@@ -141,13 +156,14 @@ function buildTimesKeyboard(dateISO, times) {
   return { inline_keyboard: rows };
 }
 
-async function bookRow(dateISO, timeHHmm, chatId, displayName) {
+// 📌 Rezervasyonu kaydet (telefon dahil)
+async function bookRow(dateISO, timeHHmm, chatId, displayName, phone) {
   await sheets.spreadsheets.values.append({
     spreadsheetId: sheetId,
-    range: `${SHEET_NAME}!A:E`,
+    range: `${SHEET_NAME}!A:F`,
     valueInputOption: 'RAW',
     requestBody: {
-      values: [[dateISO, timeHHmm, 'Booked', String(chatId), displayName]]
+      values: [[dateISO, timeHHmm, 'Booked', String(chatId), displayName, phone]]
     }
   });
   return { ok: true };
@@ -238,14 +254,23 @@ bot.on('callback_query', async (cq) => {
       const dateISO = parts[1];
       const timeHHmm = parts[2];
 
-      const displayName = [from.first_name, from.last_name].filter(Boolean).join(' ') || (from.username ? '@' + from.username : 'Unknown');
+      const displayName = [from.first_name, from.last_name].filter(Boolean).join(' ')
+        || (from.username ? '@' + from.username : 'Unknown');
 
-      await bookRow(dateISO, timeHHmm, chatId, displayName);
+      // Telefon iste: paylaş butonu + manuel giriş opsiyonu
+      pending.set(chatId, { dateISO, timeHHmm, displayName });
 
-      await bot.answerCallbackQuery(id, { text: 'Rezervasyon onaylandı ✅' });
-      return bot.editMessageText(
-        `✅ Rezervasyonunuz onaylandı:\n📅 ${formatDateLabel(dateISO)}\n⏰ ${timeHHmm}`,
-        { chat_id: chatId, message_id: message.message_id }
+      const sharePhoneKeyboard = {
+        keyboard: [[{ text: "📱 Numaramı paylaş", request_contact: true }]],
+        resize_keyboard: true,
+        one_time_keyboard: true
+      };
+
+      await bot.answerCallbackQuery(id);
+      return bot.sendMessage(
+        chatId,
+        "📞 Rezervasyonu tamamlamak için telefon numaranı paylaşır mısın?\n\n• Aşağıdaki **📱 Numaramı paylaş** butonuna dokunabilir\n• Ya da numaranı **+90...** formatında yazabilirsin.",
+        { reply_markup: sharePhoneKeyboard }
       );
     }
 
@@ -258,9 +283,64 @@ bot.on('callback_query', async (cq) => {
   }
 });
 
-bot.on('message', (msg) => {
+// 📲 Kullanıcı contact objesi ile paylaştıysa
+bot.on('contact', async (msg) => {
+  const chatId = msg.chat.id;
+  const pend = pending.get(chatId);
+  if (!pend) {
+    return bot.sendMessage(chatId, "Şu an aktif bir rezervasyon adımı bulunmuyor. /book yazarak başlayabilirsin.");
+  }
+
+  const phone = normalizePhone(msg.contact.phone_number);
+  if (!isLikelyPhone(phone)) {
+    return bot.sendMessage(chatId, "Telefon numarası okunamadı. Lütfen manuel olarak +90... formatında yaz.");
+  }
+
+  try {
+    await bookRow(pend.dateISO, pend.timeHHmm, chatId, pend.displayName, phone);
+    pending.delete(chatId);
+
+    await bot.sendMessage(
+      chatId,
+      `✅ Rezervasyon tamamlandı!\n📅 ${formatDateLabel(pend.dateISO)}\n⏰ ${pend.timeHHmm}\n📞 ${phone}`,
+      { reply_markup: { remove_keyboard: true } }
+    );
+  } catch (e) {
+    console.error("Phone contact save error:", e);
+    bot.sendMessage(chatId, "❌ Kayıt sırasında bir hata oluştu. Lütfen tekrar deneyin.");
+  }
+});
+
+// 🔤 Kullanıcı manuel telefon yazarsa
+bot.on('message', async (msg) => {
   const text = msg.text || '';
+  const chatId = msg.chat.id;
+
+  // Komut değilse ve telefon bekliyorsak
   if (!text.startsWith('/')) {
-    bot.sendMessage(msg.chat.id, 'Rezervasyon için /book yazabilirsiniz. 🙂');
+    const pend = pending.get(chatId);
+    if (pend) {
+      if (isLikelyPhone(text)) {
+        const phone = normalizePhone(text);
+        try {
+          await bookRow(pend.dateISO, pend.timeHHmm, chatId, pend.displayName, phone);
+          pending.delete(chatId);
+
+          return bot.sendMessage(
+            chatId,
+            `✅ Rezervasyon tamamlandı!\n📅 ${formatDateLabel(pend.dateISO)}\n⏰ ${pend.timeHHmm}\n📞 ${phone}`,
+            { reply_markup: { remove_keyboard: true } }
+          );
+        } catch (e) {
+          console.error("Manual phone save error:", e);
+          return bot.sendMessage(chatId, "❌ Kayıt sırasında bir hata oluştu. Lütfen tekrar deneyin.");
+        }
+      } else {
+        // Telefon bekleniyor ama uygun format değil
+        return bot.sendMessage(chatId, "Lütfen telefon numaranı **+90...** formatında yaz veya **📱 Numaramı paylaş** butonunu kullan.");
+      }
+    }
+    // Normal serbest mesaj akışı
+    return bot.sendMessage(chatId, 'Rezervasyon için /book yazabilirsiniz. 🙂');
   }
 });
