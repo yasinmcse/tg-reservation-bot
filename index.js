@@ -260,7 +260,7 @@ bot.on('callback_query', async (cq) => {
       // Telefon iste: paylaş butonu + manuel giriş opsiyonu
       pending.set(chatId, { dateISO, timeHHmm, displayName });
 
-      const sharePhoneKeyboard = {
+     const sharePhoneKeyboard = {
   reply_markup: {
     keyboard: [
       [{ text: "📱 Numaramı paylaş", request_contact: true }]
@@ -347,4 +347,5 @@ bot.on('message', async (msg) => {
     return bot.sendMessage(chatId, 'Rezervasyon için /book yazabilirsiniz. 🙂');
   }
 });
+
 
