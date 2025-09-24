@@ -32,10 +32,10 @@ const auth = new google.auth.JWT(
 );
 const sheets = google.sheets({ version: "v4", auth });
 
-// 🤖 Bot (polling)
+// 🤖 Bot
 const bot = new TelegramBot(token, { polling: true });
 
-/* ----------------- Yardımcı Fonksiyonlar ----------------- */
+/* ----------------- Fonksiyonlar ----------------- */
 function formatDateLabel(iso) {
   try {
     const d = new Date(iso + "T00:00:00");
@@ -49,15 +49,12 @@ function formatDateLabel(iso) {
 async function readAllRows() {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: `${SHEET_NAME}!A1:F`, // Telefon için F sütunu ekledik
+    range: `${SHEET_NAME}!A1:F`,
   });
-
   const rows = res.data.values || [];
   if (rows.length === 0) return [];
-
-  const header = rows[0]; // ["Date","Time","Status","ChatID","Name","Phone"]
+  const header = rows[0];
   const data = rows.slice(1);
-
   const idx = {
     date: header.indexOf("Date"),
     time: header.indexOf("Time"),
@@ -66,7 +63,6 @@ async function readAllRows() {
     name: header.indexOf("Name"),
     phone: header.indexOf("Phone"),
   };
-
   return data.map((r, i) => ({
     row: i + 2,
     date: (r[idx.date] || "").trim(),
@@ -81,36 +77,30 @@ async function readAllRows() {
 async function getAvailabilityMap() {
   const today = new Date();
   const allSlots = new Map();
-
   for (let i = 0; i < DAYS_AHEAD; i++) {
     const d = new Date(today);
     d.setDate(today.getDate() + i);
     const iso = d.toISOString().slice(0, 10);
     allSlots.set(iso, [...DAILY_SLOTS]);
   }
-
   const bookedRows = await readAllRows();
   const booked = bookedRows.filter((r) => r.status.toLowerCase() === "booked");
-
   for (const r of booked) {
     if (allSlots.has(r.date)) {
       const times = allSlots.get(r.date).filter((t) => t !== r.time);
       allSlots.set(r.date, times);
     }
   }
-
   for (const [d, arr] of allSlots.entries()) {
     if (arr.length === 0) allSlots.delete(d);
   }
-
   return allSlots;
 }
 
 async function bookRow(dateISO, timeHHmm, chatId, displayName) {
-  const updateRange = `${SHEET_NAME}!A:F`;
   await sheets.spreadsheets.values.append({
     spreadsheetId: sheetId,
-    range: updateRange,
+    range: `${SHEET_NAME}!A:F`,
     valueInputOption: "RAW",
     requestBody: {
       values: [[dateISO, timeHHmm, "Booked", String(chatId), displayName, ""]],
@@ -123,15 +113,12 @@ async function cancelBooking(chatId) {
   const all = await readAllRows();
   const row = all.find((r) => r.chatId === String(chatId));
   if (!row) return false;
-
   const updateRange = `${SHEET_NAME}!C${row.row}:F${row.row}`;
   await sheets.spreadsheets.values.update({
     spreadsheetId: sheetId,
     range: updateRange,
     valueInputOption: "RAW",
-    requestBody: {
-      values: [["Cancelled", "", "", ""]],
-    },
+    requestBody: { values: [["Cancelled", "", "", ""]] },
   });
   return true;
 }
@@ -164,7 +151,7 @@ function buildTimesKeyboard(dateISO, times) {
 bot.onText(/\/start/, (msg) => {
   bot.sendMessage(
     msg.chat.id,
-    "Merhaba 👋 Rezervasyon botuna hoş geldiniz!\n\nTarih seçmek için /book yazın.\nRezervasyonu iptal etmek için /cancel yazın."
+    "Merhaba 👋 Rezervasyon botuna hoş geldiniz!\n\n📅 Rezervasyon için /book\n❌ İptal için /cancel"
   );
 });
 
@@ -188,28 +175,17 @@ bot.onText(/\/book/, async (msg) => {
 bot.onText(/\/cancel/, async (msg) => {
   const chatId = msg.chat.id;
   const ok = await cancelBooking(chatId);
-  if (ok) {
-    bot.sendMessage(chatId, "❌ Rezervasyonun iptal edildi.");
-  } else {
-    bot.sendMessage(chatId, "📌 İptal edilecek aktif rezervasyon bulunamadı.");
-  }
+  if (ok) bot.sendMessage(chatId, "❌ Rezervasyonun iptal edildi.");
+  else bot.sendMessage(chatId, "📌 İptal edilecek rezervasyon bulunamadı.");
 });
 
 bot.on("callback_query", async (cq) => {
   const { id, message, data, from } = cq;
   const chatId = message.chat.id;
-
   try {
     if (data === "back_dates") {
       const map = await getAvailabilityMap();
       const dates = [...map.keys()];
-      if (dates.length === 0) {
-        await bot.answerCallbackQuery(id, { text: "Uygun tarih yok." });
-        return bot.sendMessage(
-          chatId,
-          "Şu an için uygun tarih bulunamadı. 🙏"
-        );
-      }
       await bot.answerCallbackQuery(id);
       return bot.editMessageText("📅 Lütfen bir tarih seçin:", {
         chat_id: chatId,
@@ -222,21 +198,6 @@ bot.on("callback_query", async (cq) => {
       const dateISO = data.replace("day_", "");
       const map = await getAvailabilityMap();
       const times = map.get(dateISO) || [];
-
-      if (times.length === 0) {
-        await bot.answerCallbackQuery(id, {
-          text: "Bu gün için uygun saat yok.",
-        });
-        return bot.editMessageText(
-          `📅 ${formatDateLabel(dateISO)}: Uygun saat bulunamadı.`,
-          {
-            chat_id: chatId,
-            message_id: message.message_id,
-            reply_markup: buildDatesKeyboard([...map.keys()]),
-          }
-        );
-      }
-
       await bot.answerCallbackQuery(id);
       return bot.editMessageText(
         `📅 ${formatDateLabel(dateISO)} için bir saat seçin:`,
@@ -249,10 +210,7 @@ bot.on("callback_query", async (cq) => {
     }
 
     if (data.startsWith("slot_")) {
-      const parts = data.split("_");
-      const dateISO = parts[1];
-      const timeHHmm = parts[2];
-
+      const [_, dateISO, timeHHmm] = data.split("_");
       const displayName =
         [from.first_name, from.last_name].filter(Boolean).join(" ") ||
         (from.username ? "@" + from.username : "Unknown");
@@ -263,74 +221,69 @@ bot.on("callback_query", async (cq) => {
       await bot.editMessageText(
         `✅ Rezervasyon onaylandı:\n📅 ${formatDateLabel(
           dateISO
-        )}\n⏰ ${timeHHmm}\n\n📞 Lütfen telefon numaranı paylaş.`,
+        )}\n⏰ ${timeHHmm}\n\n📞 Telefon numaranı paylaş.`,
         { chat_id: chatId, message_id: message.message_id }
       );
 
-      const sharePhoneKeyboard = {
-        reply_markup: {
-          keyboard: [
-            [{ text: "📱 Numaramı paylaş", request_contact: true }],
-          ],
-          resize_keyboard: true,
-          one_time_keyboard: true,
-        },
-      };
-
       await bot.sendMessage(
-  chatId,
-  "📞 Rezervasyonu tamamlamak için telefon numaranı paylaşır mısın?\n\n• Aşağıdaki 📱 **Numaramı paylaş** butonuna dokun\n• Ya da **+90...** formatında yaz.",
-  {
-    reply_markup: {
-      keyboard: [
-        [{ text: "📱 Numaramı paylaş", request_contact: true }]
-      ],
-      resize_keyboard: true,
-      one_time_keyboard: true
-    },
-    parse_mode: "Markdown"
-  }
-);
-
-    await bot.answerCallbackQuery(id);
+        chatId,
+        "📞 Rezervasyonu tamamlamak için telefon numaranı paylaşır mısın?\n\n• Aşağıdaki 📱 **Numaramı paylaş** butonuna dokun\n• Ya da **+90...** formatında yaz.",
+        {
+          reply_markup: {
+            keyboard: [[{ text: "📱 Numaramı paylaş", request_contact: true }]],
+            resize_keyboard: true,
+            one_time_keyboard: true,
+          },
+          parse_mode: "Markdown",
+        }
+      );
+    }
   } catch (err) {
     console.error("Callback error:", err);
     try {
-      await bot.answerCallbackQuery(cq.id, { text: "Hata oluştu." });
+      await bot.answerCallbackQuery(id, { text: "Hata oluştu." });
     } catch {}
     bot.sendMessage(chatId, "❌ İşlem sırasında hata oluştu.");
   }
 });
 
-// 📞 Telefon yakalama
+// 📞 Telefon butonu
 bot.on("contact", async (msg) => {
   const chatId = msg.chat.id;
   const phone = msg.contact.phone_number;
-
   const all = await readAllRows();
   const row = all.find((r) => r.chatId === String(chatId));
   if (row) {
-    const updateRange = `${SHEET_NAME}!F${row.row}`;
     await sheets.spreadsheets.values.update({
       spreadsheetId: sheetId,
-      range: updateRange,
+      range: `${SHEET_NAME}!F${row.row}`,
       valueInputOption: "RAW",
       requestBody: { values: [[phone]] },
     });
   }
-
-  await bot.sendMessage(
-    chatId,
-    `✅ Telefon numaran alındı: ${phone}\nTeşekkürler!`
-  );
+  bot.sendMessage(chatId, `✅ Telefon kaydedildi: ${phone}`);
 });
 
-// Genel mesaj
-bot.on("message", (msg) => {
+// 📞 Manuel +90 numara
+bot.on("message", async (msg) => {
   if (msg.contact) return;
+  const chatId = msg.chat.id;
   const text = msg.text || "";
+  if (/^\+90\d{10}$/.test(text)) {
+    const phone = text;
+    const all = await readAllRows();
+    const row = all.find((r) => r.chatId === String(chatId));
+    if (row) {
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: sheetId,
+        range: `${SHEET_NAME}!F${row.row}`,
+        valueInputOption: "RAW",
+        requestBody: { values: [[phone]] },
+      });
+    }
+    return bot.sendMessage(chatId, `✅ Telefon kaydedildi: ${phone}`);
+  }
   if (!text.startsWith("/")) {
-    bot.sendMessage(msg.chat.id, "Rezervasyon için /book yazabilirsiniz. 🙂");
+    bot.sendMessage(chatId, "Rezervasyon için /book yazabilirsiniz. 🙂");
   }
 });
-
