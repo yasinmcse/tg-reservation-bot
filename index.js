@@ -35,17 +35,66 @@ const sheets = google.sheets({ version: "v4", auth });
 // 🤖 Bot
 const bot = new TelegramBot(token, { polling: true });
 
-/* ----------------- Fonksiyonlar ----------------- */
-function formatDateLabel(iso) {
+/* ----------------- i18n ----------------- */
+const TRANSLATIONS = {
+  tr: {
+    START: 'Merhaba 👋 Rezervasyon botuna hoş geldiniz!\n\n📅 Rezervasyon için /book\n❌ İptal için /cancel',
+    ASK_DATE: '📅 Lütfen bir tarih seçin:',
+    NO_DATES: 'Şu an için uygun tarih bulunamadı. 🙏',
+    ASK_PHONE: "📞 Rezervasyonu tamamlamak için telefon numaranı paylaşır mısın?\n\n• Aşağıdaki *📱 Numaramı paylaş* butonuna dokun\n• Ya da *+90...* formatında yaz.",
+    BOOKED_CONFIRM: '✅ Rezervasyon onaylandı:\n📅 {date}\n⏰ {time}\n\n📞 Lütfen telefon numaranı paylaş.',
+    CANCEL_OK: '❌ Rezervasyonun iptal edildi.',
+    CANCEL_NO: '📌 İptal edilecek rezervasyon bulunamadı.',
+    DEFAULT: ''
+  },
+  en: {
+    START: 'Hello 👋 Welcome to the reservation bot!\n\n📅 Use /book to make a booking\n❌ Use /cancel to cancel a booking',
+    ASK_DATE: '📅 Please pick a date:',
+    NO_DATES: 'No available dates at the moment. 🙏',
+    ASK_PHONE: "📞 Please share your phone number to complete the booking.\n\n• Tap *📱 Share my phone* button below\n• Or type your number in international format (+90...)",
+    BOOKED_CONFIRM: '✅ Your booking is confirmed:\n📅 {date}\n⏰ {time}\n\n📞 Please share your phone number.',
+    CANCEL_OK: '❌ Your booking has been cancelled.',
+    CANCEL_NO: '📌 No booking found to cancel.',
+    DEFAULT: ''
+  },
+  ru: {
+    START: 'Привет 👋 Добро пожаловать в бота для бронирования!\n\n📅 Для брони используйте /book\n❌ Для отмены используйте /cancel',
+    ASK_DATE: '📅 Пожалуйста, выберите дату:',
+    NO_DATES: 'На данный момент нет доступных дат. 🙏',
+    ASK_PHONE: "📞 Пожалуйста, поделитесь своим номером телефона, чтобы завершить бронирование.\n\n• Нажмите кнопку *📱 Поделиться номером телефона* ниже\n• Или введите номер в международном формате (+90...)",
+    BOOKED_CONFIRM: '✅ Ваше бронирование подтверждено:\n📅 {date}\n⏰ {time}\n\n📞 Пожалуйста, поделитесь своим номером телефона.',
+    CANCEL_OK: '❌ Ваше бронирование отменено.',
+    CANCEL_NO: '📌 Нет активных бронирований для отмены.',
+    DEFAULT: ''
+  }
+};
+
+function userLangFrom(msg) {
+  const code = (msg && msg.from && msg.from.language_code) ? String(msg.from.language_code) : '';
+  if (!code) return 'en';
+  const short = code.split(/[-_]/)[0];
+  return TRANSLATIONS[short] ? short : 'en';
+}
+
+function t(lang, key, params = {}) {
+  const dict = TRANSLATIONS[lang] || TRANSLATIONS['en'];
+  let txt = dict[key] || dict['DEFAULT'] || '';
+  for (const k in params) {
+    txt = txt.replace(`{${k}}`, params[k]);
+  }
+  return txt;
+}
+
+function formatDateForLang(isoDate, lang) {
   try {
-    const d = new Date(iso + "T00:00:00");
-    const opts = { weekday: "short", day: "2-digit", month: "short" };
-    return d.toLocaleDateString("tr-TR", opts).replace(".", "");
+    const d = new Date(isoDate + "T00:00:00");
+    return d.toLocaleDateString(lang, { weekday: "short", day: "2-digit", month: "short" });
   } catch {
-    return iso;
+    return isoDate;
   }
 }
 
+/* ----------------- Fonksiyonlar ----------------- */
 async function readAllRows() {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
@@ -106,17 +155,15 @@ async function bookRow(dateISO, timeHHmm, chatId, displayName) {
       values: [[dateISO, timeHHmm, "Booked", String(chatId), displayName, ""]],
     },
   });
-  return { ok: true };
 }
 
 async function cancelBooking(chatId) {
   const all = await readAllRows();
   const row = all.find((r) => r.chatId === String(chatId));
   if (!row) return false;
-  const updateRange = `${SHEET_NAME}!C${row.row}:F${row.row}`;
   await sheets.spreadsheets.values.update({
     spreadsheetId: sheetId,
-    range: updateRange,
+    range: `${SHEET_NAME}!C${row.row}:F${row.row}`,
     valueInputOption: "RAW",
     requestBody: { values: [["Cancelled", "", "", ""]] },
   });
@@ -129,9 +176,9 @@ function chunk(arr, size) {
   return out;
 }
 
-function buildDatesKeyboard(dates) {
+function buildDatesKeyboard(dates, lang) {
   const buttons = dates.map((d) => ({
-    text: formatDateLabel(d),
+    text: formatDateForLang(d, lang),
     callback_data: `day_${d}`,
   }));
   return { inline_keyboard: chunk(buttons, 3) };
@@ -143,54 +190,55 @@ function buildTimesKeyboard(dateISO, times) {
     callback_data: `slot_${dateISO}_${t}`,
   }));
   const rows = chunk(buttons, 3);
-  rows.push([{ text: "↩️ Tarih seç", callback_data: "back_dates" }]);
+  rows.push([{ text: "↩️ Back", callback_data: "back_dates" }]);
   return { inline_keyboard: rows };
 }
 
 /* ----------------- Bot Akışı ----------------- */
 bot.onText(/\/start/, (msg) => {
-  bot.sendMessage(
-    msg.chat.id,
-    "Merhaba 👋 Rezervasyon botuna hoş geldiniz!\n\n📅 Rezervasyon için /book\n❌ İptal için /cancel"
-  );
+  const lang = userLangFrom(msg);
+  bot.sendMessage(msg.chat.id, t(lang, 'START'));
 });
 
 bot.onText(/\/book/, async (msg) => {
   const chatId = msg.chat.id;
+  const lang = userLangFrom(msg);
   try {
     const map = await getAvailabilityMap();
     const dates = [...map.keys()];
     if (dates.length === 0) {
-      return bot.sendMessage(chatId, "Şu an için uygun tarih bulunamadı. 🙏");
+      return bot.sendMessage(chatId, t(lang, 'NO_DATES'));
     }
-    await bot.sendMessage(chatId, "📅 Lütfen bir tarih seçin:", {
-      reply_markup: buildDatesKeyboard(dates),
+    await bot.sendMessage(chatId, t(lang, 'ASK_DATE'), {
+      reply_markup: buildDatesKeyboard(dates, lang),
     });
   } catch (err) {
     console.error("Book error:", err);
-    bot.sendMessage(chatId, "❌ Takvim yüklenirken hata oluştu.");
+    bot.sendMessage(chatId, "❌ Error loading calendar.");
   }
 });
 
 bot.onText(/\/cancel/, async (msg) => {
   const chatId = msg.chat.id;
+  const lang = userLangFrom(msg);
   const ok = await cancelBooking(chatId);
-  if (ok) bot.sendMessage(chatId, "❌ Rezervasyonun iptal edildi.");
-  else bot.sendMessage(chatId, "📌 İptal edilecek rezervasyon bulunamadı.");
+  bot.sendMessage(chatId, ok ? t(lang, 'CANCEL_OK') : t(lang, 'CANCEL_NO'));
 });
 
 bot.on("callback_query", async (cq) => {
   const { id, message, data, from } = cq;
   const chatId = message.chat.id;
+  const lang = userLangFrom(message);
+
   try {
     if (data === "back_dates") {
       const map = await getAvailabilityMap();
       const dates = [...map.keys()];
       await bot.answerCallbackQuery(id);
-      return bot.editMessageText("📅 Lütfen bir tarih seçin:", {
+      return bot.editMessageText(t(lang, 'ASK_DATE'), {
         chat_id: chatId,
         message_id: message.message_id,
-        reply_markup: buildDatesKeyboard(dates),
+        reply_markup: buildDatesKeyboard(dates, lang),
       });
     }
 
@@ -200,7 +248,7 @@ bot.on("callback_query", async (cq) => {
       const times = map.get(dateISO) || [];
       await bot.answerCallbackQuery(id);
       return bot.editMessageText(
-        `📅 ${formatDateLabel(dateISO)} için bir saat seçin:`,
+        `📅 ${formatDateForLang(dateISO, lang)}:`,
         {
           chat_id: chatId,
           message_id: message.message_id,
@@ -217,33 +265,30 @@ bot.on("callback_query", async (cq) => {
 
       await bookRow(dateISO, timeHHmm, chatId, displayName);
 
-      await bot.answerCallbackQuery(id, { text: "Rezervasyon onaylandı ✅" });
+      await bot.answerCallbackQuery(id, { text: "OK" });
       await bot.editMessageText(
-        `✅ Rezervasyon onaylandı:\n📅 ${formatDateLabel(
-          dateISO
-        )}\n⏰ ${timeHHmm}\n\n📞 Telefon numaranı paylaş.`,
-        { chat_id: chatId, message_id: message.message_id }
+        t(lang, 'BOOKED_CONFIRM', {
+          date: formatDateForLang(dateISO, lang),
+          time: timeHHmm,
+        }),
+        { chat_id: chatId, message_id: message.message_id, parse_mode: "Markdown" }
       );
 
-      await bot.sendMessage(
-        chatId,
-        "📞 Rezervasyonu tamamlamak için telefon numaranı paylaşır mısın?\n\n• Aşağıdaki 📱 **Numaramı paylaş** butonuna dokun\n• Ya da **+90...** formatında yaz.",
-        {
-          reply_markup: {
-            keyboard: [[{ text: "📱 Numaramı paylaş", request_contact: true }]],
-            resize_keyboard: true,
-            one_time_keyboard: true,
-          },
-          parse_mode: "Markdown",
-        }
-      );
+      await bot.sendMessage(chatId, t(lang, 'ASK_PHONE'), {
+        reply_markup: {
+          keyboard: [[{ text: "📱 Numaramı paylaş", request_contact: true }]],
+          resize_keyboard: true,
+          one_time_keyboard: true,
+        },
+        parse_mode: "Markdown",
+      });
     }
   } catch (err) {
     console.error("Callback error:", err);
     try {
-      await bot.answerCallbackQuery(id, { text: "Hata oluştu." });
+      await bot.answerCallbackQuery(cq.id, { text: "Error" });
     } catch {}
-    bot.sendMessage(chatId, "❌ İşlem sırasında hata oluştu.");
+    bot.sendMessage(chatId, "❌ Error occurred.");
   }
 });
 
@@ -261,7 +306,7 @@ bot.on("contact", async (msg) => {
       requestBody: { values: [[phone]] },
     });
   }
-  bot.sendMessage(chatId, `✅ Telefon kaydedildi: ${phone}`);
+  bot.sendMessage(chatId, `✅ ${phone} kaydedildi`);
 });
 
 // 📞 Manuel +90 numara
@@ -281,9 +326,10 @@ bot.on("message", async (msg) => {
         requestBody: { values: [[phone]] },
       });
     }
-    return bot.sendMessage(chatId, `✅ Telefon kaydedildi: ${phone}`);
+    return bot.sendMessage(chatId, `✅ ${phone} kaydedildi`);
   }
   if (!text.startsWith("/")) {
-    bot.sendMessage(chatId, "Rezervasyon için /book yazabilirsiniz. 🙂");
+    const lang = userLangFrom(msg);
+    bot.sendMessage(chatId, t(lang, 'START'));
   }
 });
