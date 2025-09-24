@@ -261,18 +261,21 @@ bot.on('callback_query', async (cq) => {
       pending.set(chatId, { dateISO, timeHHmm, displayName });
 
       const sharePhoneKeyboard = {
-        keyboard: [[{ text: "📱 Numaramı paylaş", request_contact: true }]],
-        resize_keyboard: true,
-        one_time_keyboard: true
-      };
+  reply_markup: {
+    keyboard: [
+      [{ text: "📱 Numaramı paylaş", request_contact: true }]
+    ],
+    resize_keyboard: true,
+    one_time_keyboard: true
+  }
+};
 
-      await bot.answerCallbackQuery(id);
-      return bot.sendMessage(
-        chatId,
-        "📞 Rezervasyonu tamamlamak için telefon numaranı paylaşır mısın?\n\n• Aşağıdaki **📱 Numaramı paylaş** butonuna dokunabilir\n• Ya da numaranı **+90...** formatında yazabilirsin.",
-        { reply_markup: sharePhoneKeyboard }
-      );
-    }
+await bot.sendMessage(
+  chatId,
+  "📞 Rezervasyonu tamamlamak için telefon numaranı paylaşır mısın?\n\n• Aşağıdaki **📱 Numaramı paylaş** butonuna dokunabilir\n• Ya da numaranı **+90...** formatında yazabilirsin.",
+  { ...sharePhoneKeyboard, parse_mode: "Markdown" }
+);
+
 
     await bot.answerCallbackQuery(id);
 
@@ -344,3 +347,4 @@ bot.on('message', async (msg) => {
     return bot.sendMessage(chatId, 'Rezervasyon için /book yazabilirsiniz. 🙂');
   }
 });
+
