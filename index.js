@@ -18,11 +18,15 @@ const token = process.env.BOT_TOKEN;
 const sheetId = process.env.SHEET_ID;
 const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
 
+// 📅 Otomatik tarih & saat ayarları
+const DAYS_AHEAD = 7;  // kaç gün ileriye kadar slot üretilecek
+const DAILY_SLOTS = ["10:00", "11:00", "14:00", "15:00"]; // her gün için saatler
+
 // 📝 Sheet ayarları
-const SHEET_NAME = 'Reservations';     // farklıysa değiştir
-const RANGE_READ = `${SHEET_NAME}!A1:E`; // Date, Time, Status, ChatID, Name
-const MAX_DATE_BUTTONS = 9;     // aynı anda gösterilecek gün sayısı (müsait güne göre)
-const BUTTONS_PER_ROW = 3;      // satır başına kaç tarih/saat butonu
+const SHEET_NAME = 'Reservations';     
+const RANGE_READ = `${SHEET_NAME}!A1:E`; 
+const MAX_DATE_BUTTONS = 9;    
+const BUTTONS_PER_ROW = 3;      
 
 // ✅ Google Sheets client
 const auth = new google.auth.JWT(
@@ -41,27 +45,16 @@ const bot = new TelegramBot(token, { polling: true });
 // ISO (YYYY-MM-DD) gün etiketi (tr-TR)
 function formatDateLabel(iso) {
   try {
-    const d = new Date(iso + 'T00:00:00'); // güvenli parse
+    const d = new Date(iso + 'T00:00:00');
     const opts = { weekday: 'short', day: '2-digit', month: 'short' };
-    // Örn: "Per 25 Eyl"
     const s = d.toLocaleDateString('tr-TR', opts);
-    // küçük harf sorunlarını düzelt
     return s.replace('.', '');
   } catch {
     return iso;
   }
 }
 
-// Bugünden önceki tarihleri ele
-function isFutureOrToday(iso) {
-  // ISO karşılaştırması güvenli (YYYY-MM-DD)
-  const today = new Date();
-  const tz = new Date(today.getTime() - today.getTimezoneOffset() * 60000);
-  const todayISO = tz.toISOString().slice(0, 10);
-  return iso >= todayISO;
-}
-
-// Sheet -> satır nesneleri
+// Sheet’teki kayıtları oku
 async function readAllRows() {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
@@ -71,7 +64,7 @@ async function readAllRows() {
   const rows = res.data.values || [];
   if (rows.length === 0) return [];
 
-  const header = rows[0]; // ["Date","Time","Status","ChatID","Name"]
+  const header = rows[0]; 
   const data = rows.slice(1);
 
   const idx = {
@@ -82,9 +75,7 @@ async function readAllRows() {
     name: header.indexOf('Name'),
   };
 
-  // 1-based row number: header = row 1, data start = row 2
   return data.map((r, i) => ({
-    row: i + 2,
     date: (r[idx.date] || '').trim(),
     time: (r[idx.time] || '').trim(),
     status: (r[idx.status] || '').trim(),
@@ -93,32 +84,33 @@ async function readAllRows() {
   }));
 }
 
-// Müsait günleri ve saatleri haritalandır
+// 📅 Otomatik slot üret ve doluları Sheet’ten çıkar
 async function getAvailabilityMap() {
-  const all = await readAllRows();
+  const today = new Date();
+  const allSlots = new Map();
 
-  const map = new Map(); // dateISO => [ "HH:mm", ... ]
-  for (const r of all) {
-    if (!r.date || !r.time) continue;
-    if (!isFutureOrToday(r.date)) continue;
+  // Günleri ve saatleri üret
+  for (let i = 0; i < DAYS_AHEAD; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    const iso = d.toISOString().slice(0, 10);
+    allSlots.set(iso, [...DAILY_SLOTS]);
+  }
 
-    // Status boş veya "Free" ise müsait kabul et
-    const free = !r.status || r.status.toLowerCase() === 'free';
-    const notBooked = !r.chatId && !r.name; // tamamen boş satırlar öncelikli
+  // Sheet’teki dolu slotları çek
+  const bookedRows = await readAllRows();
+  const booked = bookedRows.filter(r => r.status.toLowerCase() === "booked");
 
-    if (free && notBooked) {
-      if (!map.has(r.date)) map.set(r.date, []);
-      map.get(r.date).push(r.time);
+  for (const r of booked) {
+    const date = r.date;
+    const time = r.time;
+    if (allSlots.has(date)) {
+      const times = allSlots.get(date).filter(t => t !== time);
+      allSlots.set(date, times);
     }
   }
 
-  // Saatleri sırala
-  for (const [d, arr] of map.entries()) {
-    arr.sort((a, b) => a.localeCompare(b));
-  }
-
-  // Günleri sırala
-  return new Map([...map.entries()].sort((a, b) => a[0].localeCompare(b[0])));
+  return allSlots;
 }
 
 // Inline keyboard satırı oluştur
@@ -128,7 +120,6 @@ function chunk(arr, size) {
   return out;
 }
 
-// Tarih seçimi klavyesi
 function buildDatesKeyboard(dates) {
   const buttons = dates.slice(0, MAX_DATE_BUTTONS).map(d => ({
     text: formatDateLabel(d),
@@ -138,45 +129,27 @@ function buildDatesKeyboard(dates) {
   return { inline_keyboard: rows };
 }
 
-// Saat seçimi klavyesi
 function buildTimesKeyboard(dateISO, times) {
   const buttons = times.map(t => ({
     text: t,
     callback_data: `slot_${dateISO}_${t}`,
   }));
   const rows = chunk(buttons, BUTTONS_PER_ROW);
-  // Geri butonu
   rows.push([{ text: '↩️ Tarih seç', callback_data: 'back_dates' }]);
   return { inline_keyboard: rows };
 }
 
-// Satırı rezerve et (Status, ChatID, Name alanlarını yazar)
+// Rezervasyonu kaydet
 async function bookRow(dateISO, timeHHmm, chatId, displayName) {
-  const all = await readAllRows();
-  // Uygun satırı bul
-  const candidate = all.find(r =>
-    r.date === dateISO &&
-    r.time === timeHHmm &&
-    (!r.status || r.status.toLowerCase() === 'free') &&
-    !r.chatId && !r.name
-  );
-
-  if (!candidate) {
-    return { ok: false, reason: 'already_booked' };
-  }
-
-  // C:D:E hücrelerini yaz (Status, ChatID, Name)
-  const updateRange = `${SHEET_NAME}!C${candidate.row}:E${candidate.row}`;
-  await sheets.spreadsheets.values.update({
+  await sheets.spreadsheets.values.append({
     spreadsheetId: sheetId,
-    range: updateRange,
+    range: `${SHEET_NAME}!A:E`,
     valueInputOption: 'RAW',
     requestBody: {
-      values: [[ 'Booked', String(chatId), displayName ]]
+      values: [[dateISO, timeHHmm, 'Booked', String(chatId), displayName]]
     }
   });
-
-  return { ok: true, row: candidate.row };
+  return { ok: true };
 }
 
 /* ----------------- Komutlar / Akış ----------------- */
@@ -193,7 +166,8 @@ bot.onText(/\/book/, async (msg) => {
 
   try {
     const map = await getAvailabilityMap();
-    const dates = [...map.keys()];
+    const dates = [...map.keys()].filter(d => (map.get(d) || []).length > 0);
+
     if (dates.length === 0) {
       return bot.sendMessage(chatId, 'Şu an için uygun tarih bulunamadı. 🙏');
     }
@@ -214,10 +188,10 @@ bot.on('callback_query', async (cq) => {
   const chatId = message.chat.id;
 
   try {
-    // Geri dönüş
     if (data === 'back_dates') {
       const map = await getAvailabilityMap();
-      const dates = [...map.keys()];
+      const dates = [...map.keys()].filter(d => (map.get(d) || []).length > 0);
+
       if (dates.length === 0) {
         await bot.answerCallbackQuery(id, { text: 'Uygun tarih yok.' });
         return bot.sendMessage(chatId, 'Şu an için uygun tarih bulunamadı. 🙏');
@@ -230,7 +204,6 @@ bot.on('callback_query', async (cq) => {
       });
     }
 
-    // Tarih seçimi
     if (data.startsWith('day_')) {
       const dateISO = data.replace('day_', '');
       const map = await getAvailabilityMap();
@@ -259,29 +232,22 @@ bot.on('callback_query', async (cq) => {
       );
     }
 
-    // Saat seçimi (rezervasyon)
     if (data.startsWith('slot_')) {
-      const parts = data.split('_'); // ["slot", "YYYY-MM-DD", "HH:mm"]
+      const parts = data.split('_');
       const dateISO = parts[1];
       const timeHHmm = parts[2];
 
       const displayName = [from.first_name, from.last_name].filter(Boolean).join(' ') || (from.username ? '@' + from.username : 'Unknown');
 
-      const result = await bookRow(dateISO, timeHHmm, chatId, displayName);
-
-      if (!result.ok && result.reason === 'already_booked') {
-        await bot.answerCallbackQuery(id, { text: 'Maalesef bu saat az önce doldu.' });
-        return bot.sendMessage(chatId, '❌ Maalesef bu saat az önce doldu. Lütfen tekrar /book yazın.');
-      }
+      await bookRow(dateISO, timeHHmm, chatId, displayName);
 
       await bot.answerCallbackQuery(id, { text: 'Rezervasyon onaylandı ✅' });
       return bot.editMessageText(
-        `✅ Rezervasyonunuz onaylandı:\n📅 ${formatDateLabel(dateISO)}\n⏰ ${timeHHmm}\n\nGörüşmek üzere!`,
+        `✅ Rezervasyonunuz onaylandı:\n📅 ${formatDateLabel(dateISO)}\n⏰ ${timeHHmm}`,
         { chat_id: chatId, message_id: message.message_id }
       );
     }
 
-    // Diğerleri
     await bot.answerCallbackQuery(id);
 
   } catch (err) {
@@ -291,12 +257,9 @@ bot.on('callback_query', async (cq) => {
   }
 });
 
-// Genel mesaj (komut değilse)
 bot.on('message', (msg) => {
   const text = msg.text || '';
   if (!text.startsWith('/')) {
     bot.sendMessage(msg.chat.id, 'Rezervasyon için /book yazabilirsiniz. 🙂');
   }
 });
-
-
